@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { format, parse, isValid } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { CalendarIcon, Calculator, Info, RotateCcw } from 'lucide-react';
+import { CalendarIcon, Calculator, Info, RotateCcw, AlertCircle, Edit2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -12,6 +12,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Separator } from '@/components/ui/separator';
+import { Badge } from '@/components/ui/badge';
 import { rescisaoConfig } from '@/lib/rescisao-config';
 import { DadosRescisao } from '@/lib/rescisao-calculator';
 
@@ -50,11 +51,19 @@ const INITIAL_STATE = {
   dsrDiasNaoUteis: '',
   diasAvisoEditado: '',
   justificativaAvisoEditado: '',
+  // Avos editados
+  avosFeriasEditado: '',
+  avos13Editado: '',
+  // Valores editados
+  feriasVencidasEditado: '',
+  feriasProporcionaisEditado: '',
+  decimoTerceiroEditado: '',
 };
 
 export function RescisaoForm({ onCalculate, onClear }: RescisaoFormProps) {
   const [formState, setFormState] = useState(INITIAL_STATE);
-  const [dsrCalculado, setDsrCalculado] = useState<number>(0);
+  const [dsrHeCalculado, setDsrHeCalculado] = useState<number>(0);
+  const [dsrComissoesCalculado, setDsrComissoesCalculado] = useState<number>(0);
   const [diasAvisoCalculado, setDiasAvisoCalculado] = useState<number>(30);
 
   const updateField = useCallback(<K extends keyof typeof INITIAL_STATE>(
@@ -133,28 +142,102 @@ export function RescisaoForm({ onCalculate, onClear }: RescisaoFormProps) {
     }
   }, [formState.dataAdmissao, formState.dataDesligamento]);
 
-  // Calcular DSR automaticamente
+  // Calcular avos automaticamente
+  const avosCalculados = useMemo(() => {
+    if (!formState.dataAdmissao || !formState.dataDesligamento) {
+      return { ferias: 0, decimo: 0 };
+    }
+    
+    const anos = formState.dataDesligamento.getFullYear() - formState.dataAdmissao.getFullYear();
+    const meses = formState.dataDesligamento.getMonth() - formState.dataAdmissao.getMonth();
+    const dias = formState.dataDesligamento.getDate() - formState.dataAdmissao.getDate();
+    
+    let totalMeses = anos * 12 + meses;
+    if (dias >= 15) totalMeses++;
+    
+    const mesesFerias = totalMeses % 12;
+    const meses13 = formState.dataDesligamento.getMonth() + 1;
+    
+    return { ferias: mesesFerias, decimo: meses13 };
+  }, [formState.dataAdmissao, formState.dataDesligamento]);
+
+  // Calcular DSR separados automaticamente
   useEffect(() => {
     const diasUteis = parseInt(formState.dsrDiasUteis) || 0;
     const diasNaoUteis = parseInt(formState.dsrDiasNaoUteis) || 0;
     
     if (diasUteis > 0) {
+      const salarioBase = parseCurrency(formState.salarioBase);
+      const ats = parseCurrency(formState.ats);
       const comissoes = parseCurrency(formState.comissoes);
-      const he50 = (parseCurrency(formState.salarioBase) / parseInt(formState.horasMensais || '220')) * 1.5 * parseFloat(formState.horasExtras50 || '0');
-      const he100 = (parseCurrency(formState.salarioBase) / parseInt(formState.horasMensais || '220')) * 2.0 * parseFloat(formState.horasExtras100 || '0');
-      const noturno = (parseCurrency(formState.salarioBase) / parseInt(formState.horasMensais || '220')) * parseFloat(formState.adicionalNoturnoPercent || '0') * (parseFloat(formState.horasNoturnas || '0') * (60/52.5));
+      const insalubridade = parseCurrency(formState.insalubridade);
+      const gratificacoes = parseCurrency(formState.gratificacoes);
+      const periculosidade = parseCurrency(formState.periculosidade);
       
-      const totalVar = comissoes + he50 + he100 + noturno;
-      const dsr = (totalVar / diasUteis) * diasNaoUteis;
-      setDsrCalculado(dsr);
+      const baseHe = salarioBase + ats + comissoes + insalubridade + gratificacoes + periculosidade;
+      const valorHora = baseHe / (parseInt(formState.horasMensais) || 220);
+      
+      const he50 = valorHora * 1.5 * (parseFloat(formState.horasExtras50) || 0);
+      const he100 = valorHora * 2.0 * (parseFloat(formState.horasExtras100) || 0);
+      const horasNoturnas = parseFloat(formState.horasNoturnas) || 0;
+      const noturnoPercent = parseFloat(formState.adicionalNoturnoPercent) || 0;
+      const horasNoturasEq = horasNoturnas * (60 / 52.5);
+      const noturno = valorHora * noturnoPercent * horasNoturasEq;
+      
+      const totalHe = he50 + he100 + noturno;
+      
+      // DSR separados
+      const dsrHe = (totalHe / diasUteis) * diasNaoUteis;
+      const dsrComissoes = (comissoes / diasUteis) * diasNaoUteis;
+      
+      setDsrHeCalculado(dsrHe);
+      setDsrComissoesCalculado(dsrComissoes);
     } else {
-      setDsrCalculado(0);
+      setDsrHeCalculado(0);
+      setDsrComissoesCalculado(0);
     }
-  }, [formState.dsrDiasUteis, formState.dsrDiasNaoUteis, formState.comissoes, formState.horasExtras50, formState.horasExtras100, formState.horasNoturnas, formState.adicionalNoturnoPercent, formState.salarioBase, formState.horasMensais]);
+  }, [
+    formState.dsrDiasUteis, formState.dsrDiasNaoUteis, formState.comissoes, 
+    formState.horasExtras50, formState.horasExtras100, formState.horasNoturnas, 
+    formState.adicionalNoturnoPercent, formState.salarioBase, formState.horasMensais,
+    formState.ats, formState.insalubridade, formState.gratificacoes, formState.periculosidade
+  ]);
+
+  // Total HE e Variáveis calculados
+  const totaisCalculados = useMemo(() => {
+    const salarioBase = parseCurrency(formState.salarioBase);
+    const ats = parseCurrency(formState.ats);
+    const comissoes = parseCurrency(formState.comissoes);
+    const insalubridade = parseCurrency(formState.insalubridade);
+    const gratificacoes = parseCurrency(formState.gratificacoes);
+    const periculosidade = parseCurrency(formState.periculosidade);
+    
+    const baseHe = salarioBase + ats + comissoes + insalubridade + gratificacoes + periculosidade;
+    const valorHora = baseHe / (parseInt(formState.horasMensais) || 220);
+    
+    const he50 = valorHora * 1.5 * (parseFloat(formState.horasExtras50) || 0);
+    const he100 = valorHora * 2.0 * (parseFloat(formState.horasExtras100) || 0);
+    const horasNoturnas = parseFloat(formState.horasNoturnas) || 0;
+    const noturnoPercent = parseFloat(formState.adicionalNoturnoPercent) || 0;
+    const horasNoturasEq = horasNoturnas * (60 / 52.5);
+    const noturno = valorHora * noturnoPercent * horasNoturasEq;
+    
+    const totalHe = he50 + he100;
+    const totalVariaveis = totalHe + comissoes + noturno;
+    const totalDsr = dsrHeCalculado + dsrComissoesCalculado;
+    
+    return { he50, he100, noturno, totalHe, comissoes, totalVariaveis, totalDsr };
+  }, [
+    formState.salarioBase, formState.ats, formState.comissoes, formState.insalubridade,
+    formState.gratificacoes, formState.periculosidade, formState.horasMensais,
+    formState.horasExtras50, formState.horasExtras100, formState.horasNoturnas,
+    formState.adicionalNoturnoPercent, dsrHeCalculado, dsrComissoesCalculado
+  ]);
 
   const handleClear = () => {
     setFormState(INITIAL_STATE);
-    setDsrCalculado(0);
+    setDsrHeCalculado(0);
+    setDsrComissoesCalculado(0);
     setDiasAvisoCalculado(30);
     onClear();
   };
@@ -164,6 +247,24 @@ export function RescisaoForm({ onCalculate, onClear }: RescisaoFormProps) {
     
     if (!formState.dataAdmissao || !formState.dataDesligamento || !formState.motivoCodigo) {
       return;
+    }
+
+    // Log de edições manuais
+    if (formState.avosFeriasEditado || formState.avos13Editado) {
+      console.log('[AJUSTE MANUAL] Avos editados:', {
+        feriasCalculado: avosCalculados.ferias,
+        feriasEditado: formState.avosFeriasEditado,
+        decimoCalculado: avosCalculados.decimo,
+        decimoEditado: formState.avos13Editado,
+      });
+    }
+    
+    if (formState.feriasVencidasEditado || formState.feriasProporcionaisEditado || formState.decimoTerceiroEditado) {
+      console.log('[AJUSTE MANUAL] Valores editados:', {
+        feriasVencidasEditado: formState.feriasVencidasEditado,
+        feriasProporcionaisEditado: formState.feriasProporcionaisEditado,
+        decimoTerceiroEditado: formState.decimoTerceiroEditado,
+      });
     }
 
     const dados: DadosRescisao = {
@@ -195,10 +296,19 @@ export function RescisaoForm({ onCalculate, onClear }: RescisaoFormProps) {
       dsrDiasNaoUteis: parseInt(formState.dsrDiasNaoUteis) || 0,
       diasAvisoEditado: formState.diasAvisoEditado ? parseInt(formState.diasAvisoEditado) : undefined,
       justificativaAvisoEditado: formState.justificativaAvisoEditado || undefined,
+      // Avos editados
+      avosFeriasEditado: formState.avosFeriasEditado ? parseInt(formState.avosFeriasEditado) : undefined,
+      avos13Editado: formState.avos13Editado ? parseInt(formState.avos13Editado) : undefined,
+      // Valores editados
+      feriasVencidasEditado: formState.feriasVencidasEditado ? parseCurrency(formState.feriasVencidasEditado) : undefined,
+      feriasProporcionaisEditado: formState.feriasProporcionaisEditado ? parseCurrency(formState.feriasProporcionaisEditado) : undefined,
+      decimoTerceiroEditado: formState.decimoTerceiroEditado ? parseCurrency(formState.decimoTerceiroEditado) : undefined,
     };
 
     onCalculate(dados);
   };
+
+  const dsrDiasUteisValido = formState.dsrDiasUteis === '' || parseInt(formState.dsrDiasUteis) > 0;
 
   return (
     <Card className="card-elevated">
@@ -560,12 +670,12 @@ export function RescisaoForm({ onCalculate, onClear }: RescisaoFormProps) {
 
           <Separator />
 
-          {/* DSR sobre Variáveis */}
+          {/* DSR sobre Variáveis - SEPARADOS */}
           <div>
             <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">
               DSR sobre Variáveis
             </h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
               <div className="space-y-2">
                 <Label>Dias Úteis do Mês</Label>
                 <Input
@@ -591,20 +701,219 @@ export function RescisaoForm({ onCalculate, onClear }: RescisaoFormProps) {
                   placeholder="Ex: 5"
                 />
               </div>
+            </div>
+            
+            {!dsrDiasUteisValido && (
+              <div className="flex items-center gap-2 text-destructive text-sm mb-4">
+                <AlertCircle className="h-4 w-4" />
+                Dias úteis não pode ser zero
+              </div>
+            )}
 
+            {/* Resumo de Variáveis e DSR */}
+            <Card className="bg-muted/30">
+              <CardContent className="pt-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                  <div>
+                    <p className="text-muted-foreground">Valor HE 50%/100%</p>
+                    <p className="font-mono font-semibold text-provento">
+                      R$ {(totaisCalculados.he50 + totaisCalculados.he100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">DSR sobre HE</p>
+                    <p className="font-mono font-semibold text-provento">
+                      R$ {dsrHeCalculado.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Valor Comissões</p>
+                    <p className="font-mono font-semibold text-provento">
+                      R$ {totaisCalculados.comissoes.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">DSR sobre Comissões</p>
+                    <p className="font-mono font-semibold text-provento">
+                      R$ {dsrComissoesCalculado.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                </div>
+                <Separator className="my-3" />
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <p className="text-muted-foreground font-medium">Total Variáveis (HE + Comissões)</p>
+                    <p className="font-mono font-bold text-lg text-foreground">
+                      R$ {totaisCalculados.totalVariaveis.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground font-medium">Total DSR (HE + Comissões)</p>
+                    <p className="font-mono font-bold text-lg text-foreground">
+                      R$ {totaisCalculados.totalDsr.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Separator />
+
+          {/* Avos (1/12) – Férias e 13º */}
+          <div>
+            <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4 flex items-center gap-2">
+              Avos (1/12) – Férias e 13º
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Info className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent>
+                  Valores editados substituem os calculados automaticamente
+                </TooltipContent>
+              </Tooltip>
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Férias */}
+              <div className="space-y-3 p-4 rounded-lg border bg-card">
+                <div className="flex items-center justify-between">
+                  <Label className="text-base font-medium">Férias</Label>
+                  {formState.avosFeriasEditado && (
+                    <Badge variant="outline" className="text-xs">
+                      <Edit2 className="h-3 w-3 mr-1" />
+                      Editado
+                    </Badge>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Calculado</Label>
+                    <Input
+                      value={avosCalculados.ferias}
+                      readOnly
+                      className="font-mono bg-muted text-center"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Editado (opcional)</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      max="12"
+                      value={formState.avosFeriasEditado}
+                      onChange={(e) => updateField('avosFeriasEditado', e.target.value)}
+                      className="font-mono text-center"
+                      placeholder="0-12"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 13º */}
+              <div className="space-y-3 p-4 rounded-lg border bg-card">
+                <div className="flex items-center justify-between">
+                  <Label className="text-base font-medium">13º Salário</Label>
+                  {formState.avos13Editado && (
+                    <Badge variant="outline" className="text-xs">
+                      <Edit2 className="h-3 w-3 mr-1" />
+                      Editado
+                    </Badge>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Calculado</Label>
+                    <Input
+                      value={avosCalculados.decimo}
+                      readOnly
+                      className="font-mono bg-muted text-center"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Editado (opcional)</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      max="12"
+                      value={formState.avos13Editado}
+                      onChange={(e) => updateField('avos13Editado', e.target.value)}
+                      className="font-mono text-center"
+                      placeholder="0-12"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <Separator />
+
+          {/* Valores Editáveis de Férias e 13º */}
+          <div>
+            <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4 flex items-center gap-2">
+              Valores Editáveis (Férias e 13º)
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Info className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent className="max-w-sm">
+                  Preencha para substituir o valor calculado automaticamente. O 1/3 será recalculado com base nos valores editados.
+                </TooltipContent>
+              </Tooltip>
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="space-y-2">
-                <Label>DSR Calculado (R$)</Label>
+                <Label className="flex items-center gap-2">
+                  Férias Vencidas (R$)
+                  {formState.feriasVencidasEditado && (
+                    <Badge variant="outline" className="text-xs">Editado</Badge>
+                  )}
+                </Label>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">R$</span>
                   <Input
-                    value={dsrCalculado.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    readOnly
-                    className="pl-10 font-mono bg-muted"
+                    value={formState.feriasVencidasEditado}
+                    onChange={handleCurrencyChange('feriasVencidasEditado')}
+                    className="pl-10 font-mono"
+                    placeholder="Deixe vazio para automático"
                   />
                 </div>
-                {parseInt(formState.dsrDiasUteis) === 0 && formState.dsrDiasUteis !== '' && (
-                  <p className="text-xs text-destructive">Dias úteis não pode ser zero</p>
-                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label className="flex items-center gap-2">
+                  Férias Proporcionais (R$)
+                  {formState.feriasProporcionaisEditado && (
+                    <Badge variant="outline" className="text-xs">Editado</Badge>
+                  )}
+                </Label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">R$</span>
+                  <Input
+                    value={formState.feriasProporcionaisEditado}
+                    onChange={handleCurrencyChange('feriasProporcionaisEditado')}
+                    className="pl-10 font-mono"
+                    placeholder="Deixe vazio para automático"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="flex items-center gap-2">
+                  13º Salário (R$)
+                  {formState.decimoTerceiroEditado && (
+                    <Badge variant="outline" className="text-xs">Editado</Badge>
+                  )}
+                </Label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">R$</span>
+                  <Input
+                    value={formState.decimoTerceiroEditado}
+                    onChange={handleCurrencyChange('decimoTerceiroEditado')}
+                    className="pl-10 font-mono"
+                    placeholder="Deixe vazio para automático"
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -756,7 +1065,7 @@ export function RescisaoForm({ onCalculate, onClear }: RescisaoFormProps) {
           <Button 
             type="submit" 
             className="w-full h-12 text-base font-semibold bg-accent hover:bg-accent/90"
-            disabled={!formState.salarioBase || !formState.dataAdmissao || !formState.dataDesligamento || !formState.motivoCodigo}
+            disabled={!formState.salarioBase || !formState.dataAdmissao || !formState.dataDesligamento || !formState.motivoCodigo || !dsrDiasUteisValido}
           >
             <Calculator className="mr-2 h-5 w-5" />
             Calcular Rescisão

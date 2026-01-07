@@ -15,22 +15,29 @@ export interface DadosRescisao {
   mediaVariaveis: number;
   descontoAvisoDias: number;
   dataTerminoContrato?: Date;
-  // Novos campos
-  horasMensais: number; // 220 ou 110
-  quebraCaixaPercent: number; // 0, 0.08, 0.10, 0.20
-  ats: number; // Adicional por tempo de serviço
+  // Campos existentes
+  horasMensais: number;
+  quebraCaixaPercent: number;
+  ats: number;
   comissoes: number;
   insalubridade: number;
   gratificacoes: number;
   periculosidade: number;
   horasExtras50: number;
   horasExtras100: number;
-  adicionalNoturnoPercent: number; // 0.20, 0.25, 0.30, 0.50
+  adicionalNoturnoPercent: number;
   horasNoturnas: number;
   dsrDiasUteis: number;
   dsrDiasNaoUteis: number;
-  diasAvisoEditado?: number; // Para edição manual do aviso
+  diasAvisoEditado?: number;
   justificativaAvisoEditado?: string;
+  // Novos campos: Avos editados
+  avosFeriasEditado?: number;
+  avos13Editado?: number;
+  // Novos campos: Valores editados
+  feriasVencidasEditado?: number;
+  feriasProporcionaisEditado?: number;
+  decimoTerceiroEditado?: number;
 }
 
 export interface DetalheCalculo {
@@ -48,6 +55,8 @@ export interface ResultadoVerba {
   incideIrrf: boolean;
   incideFgts: boolean;
   detalhes?: DetalheCalculo;
+  valorCalculado?: number;
+  valorEditado?: boolean;
 }
 
 export interface ResultadoRescisao {
@@ -64,11 +73,23 @@ export interface ResultadoRescisao {
   meses13: number;
   mesesFerias: number;
   anosCompletos: number;
-  dsrValor: number;
+  // DSR separados
+  dsrHorasExtrasValor: number;
+  dsrComissoesValor: number;
+  dsrTotalValor: number;
   dsrDiasUteis: number;
   dsrDiasNaoUteis: number;
   baseHoraExtra: number;
   valorHora: number;
+  // Avos
+  avosFeriasCalculado: number;
+  avos13Calculado: number;
+  avosFeriasEditado?: number;
+  avos13Editado?: number;
+  // Totais variáveis
+  totalHorasExtras: number;
+  totalComissoes: number;
+  totalVariaveis: number;
 }
 
 function calcularDiferencaMeses(dataInicio: Date, dataFim: Date): number {
@@ -159,19 +180,30 @@ export function calcularRescisao(dados: DadosRescisao): ResultadoRescisao {
   const quebraCaixa = dados.salarioBase * dados.quebraCaixaPercent;
   const horasExtras50Valor = valorHora * 1.5 * dados.horasExtras50;
   const horasExtras100Valor = valorHora * 2.0 * dados.horasExtras100;
+  const totalHorasExtras = horasExtras50Valor + horasExtras100Valor;
   
   // Adicional noturno (hora reduzida: 60/52.5)
   const horasNoturasEquivalentes = dados.horasNoturnas * (60 / 52.5);
   const adicionalNoturnoValor = valorHora * dados.adicionalNoturnoPercent * horasNoturasEquivalentes;
   
-  // Total de variáveis para DSR
-  const totalVariaveis = dados.comissoes + horasExtras50Valor + horasExtras100Valor + adicionalNoturnoValor;
+  // DSR SEPARADOS: HE e Comissões
+  let dsrHorasExtrasValor = 0;
+  let dsrComissoesValor = 0;
   
-  // DSR sobre variáveis
-  let dsrValor = 0;
   if (dados.dsrDiasUteis > 0) {
-    dsrValor = (totalVariaveis / dados.dsrDiasUteis) * dados.dsrDiasNaoUteis;
+    // DSR sobre HE (inclui noturno)
+    const baseHeDsr = totalHorasExtras + adicionalNoturnoValor;
+    dsrHorasExtrasValor = (baseHeDsr / dados.dsrDiasUteis) * dados.dsrDiasNaoUteis;
+    
+    // DSR sobre Comissões
+    dsrComissoesValor = (dados.comissoes / dados.dsrDiasUteis) * dados.dsrDiasNaoUteis;
   }
+  
+  const dsrTotalValor = dsrHorasExtrasValor + dsrComissoesValor;
+
+  // Totais de variáveis
+  const totalComissoes = dados.comissoes;
+  const totalVariaveis = totalHorasExtras + totalComissoes + adicionalNoturnoValor;
 
   // Remuneração de referência para cálculo (salário + média de variáveis)
   const remuneracaoReferencia = dados.salarioBase + dados.mediaVariaveis;
@@ -279,21 +311,45 @@ export function calcularRescisao(dados: DadosRescisao): ResultadoRescisao {
     });
   }
 
-  // DSR sobre Variáveis
-  if (dsrValor > 0) {
+  // DSR sobre Horas Extras (separado)
+  if (dsrHorasExtrasValor > 0) {
     verbas.push({
-      rubrica: 'DSR_VARIAVEIS',
-      descricao: `DSR sobre Variáveis (${dados.dsrDiasUteis} úteis / ${dados.dsrDiasNaoUteis} não úteis)`,
-      valor: dsrValor,
+      rubrica: 'DSR_HORAS_EXTRAS',
+      descricao: `DSR sobre Horas Extras (${dados.dsrDiasUteis} úteis / ${dados.dsrDiasNaoUteis} não úteis)`,
+      valor: dsrHorasExtrasValor,
       tipo: 'provento',
       incideInss: true,
       incideIrrf: true,
       incideFgts: true,
       detalhes: {
-        descricao: 'DSR calculado sobre o total de variáveis',
-        formula: '(Total Variáveis ÷ Dias Úteis) × Dias Não Úteis',
+        descricao: 'DSR calculado sobre horas extras e adicional noturno',
+        formula: '(Total HE + Noturno ÷ Dias Úteis) × Dias Não Úteis',
         valores: { 
-          'Total Variáveis': totalVariaveis,
+          'Total HE': totalHorasExtras,
+          'Adicional Noturno': adicionalNoturnoValor,
+          'Base DSR': totalHorasExtras + adicionalNoturnoValor,
+          'Dias Úteis': dados.dsrDiasUteis,
+          'Dias Não Úteis': dados.dsrDiasNaoUteis
+        }
+      }
+    });
+  }
+
+  // DSR sobre Comissões (separado)
+  if (dsrComissoesValor > 0) {
+    verbas.push({
+      rubrica: 'DSR_COMISSOES',
+      descricao: `DSR sobre Comissões (${dados.dsrDiasUteis} úteis / ${dados.dsrDiasNaoUteis} não úteis)`,
+      valor: dsrComissoesValor,
+      tipo: 'provento',
+      incideInss: true,
+      incideIrrf: true,
+      incideFgts: true,
+      detalhes: {
+        descricao: 'DSR calculado sobre comissões',
+        formula: '(Comissões ÷ Dias Úteis) × Dias Não Úteis',
+        valores: { 
+          'Comissões': dados.comissoes,
           'Dias Úteis': dados.dsrDiasUteis,
           'Dias Não Úteis': dados.dsrDiasNaoUteis
         }
@@ -350,10 +406,29 @@ export function calcularRescisao(dados: DadosRescisao): ResultadoRescisao {
     });
   }
 
+  // AVOS CALCULADOS
+  const mesesFerias = mesesVinculo % 12;
+  const avosFeriasCalculado = mesesFerias;
+  const meses13 = dados.dataDesligamento.getMonth() + 1;
+  const avos13Calculado = meses13;
+
+  // Usar avos editados se fornecidos
+  const avosFeriasUtilizado = dados.avosFeriasEditado !== undefined && dados.avosFeriasEditado >= 0 
+    ? dados.avosFeriasEditado 
+    : avosFeriasCalculado;
+  const avos13Utilizado = dados.avos13Editado !== undefined && dados.avos13Editado >= 0 
+    ? dados.avos13Editado 
+    : avos13Calculado;
+
   // Férias Vencidas
+  let feriasVencidasCalculado = 0;
   let feriasVencidasValor = 0;
   if (categoria.ferias_vencidas && dados.periodosFeriasVencidas > 0) {
-    feriasVencidasValor = remuneracaoReferencia * dados.periodosFeriasVencidas;
+    feriasVencidasCalculado = remuneracaoReferencia * dados.periodosFeriasVencidas;
+    // Usar valor editado se fornecido
+    feriasVencidasValor = dados.feriasVencidasEditado !== undefined && dados.feriasVencidasEditado >= 0
+      ? dados.feriasVencidasEditado
+      : feriasVencidasCalculado;
     
     verbas.push({
       rubrica: 'FERIAS_VENCIDAS',
@@ -363,39 +438,58 @@ export function calcularRescisao(dados: DadosRescisao): ResultadoRescisao {
       incideInss: false,
       incideIrrf: false,
       incideFgts: false,
+      valorCalculado: feriasVencidasCalculado,
+      valorEditado: dados.feriasVencidasEditado !== undefined && dados.feriasVencidasEditado !== feriasVencidasCalculado,
     });
   }
 
   // Férias Proporcionais
-  const mesesFerias = mesesVinculo % 12;
+  let feriasProporcionaisCalculado = 0;
   let feriasProporcionaisValor = 0;
-  if (categoria.ferias_prop && mesesFerias > 0) {
-    feriasProporcionaisValor = (remuneracaoReferencia / 12) * mesesFerias;
+  if (categoria.ferias_prop && avosFeriasUtilizado > 0) {
+    feriasProporcionaisCalculado = (remuneracaoReferencia / 12) * avosFeriasCalculado;
+    const feriasProporcionaisComAvos = (remuneracaoReferencia / 12) * avosFeriasUtilizado;
+    
+    // Usar valor editado se fornecido
+    feriasProporcionaisValor = dados.feriasProporcionaisEditado !== undefined && dados.feriasProporcionaisEditado >= 0
+      ? dados.feriasProporcionaisEditado
+      : feriasProporcionaisComAvos;
     
     verbas.push({
       rubrica: 'FERIAS_PROP',
-      descricao: `Férias Proporcionais (${mesesFerias}/12)`,
+      descricao: `Férias Proporcionais (${avosFeriasUtilizado}/12)${dados.avosFeriasEditado !== undefined ? ' - avos editado' : ''}`,
       valor: feriasProporcionaisValor,
       tipo: 'provento',
       incideInss: false,
       incideIrrf: false,
       incideFgts: false,
+      valorCalculado: feriasProporcionaisCalculado,
+      valorEditado: dados.feriasProporcionaisEditado !== undefined || dados.avosFeriasEditado !== undefined,
     });
   }
 
   // 13º Salário Proporcional
-  const meses13 = dados.dataDesligamento.getMonth() + 1;
+  let decimoTerceiroCalculado = 0;
+  let decimoTerceiroValor = 0;
   if (categoria.decimo_terceiro) {
-    const decimoTerceiro = (remuneracaoReferencia / 12) * meses13;
+    decimoTerceiroCalculado = (remuneracaoReferencia / 12) * avos13Calculado;
+    const decimoTerceiroComAvos = (remuneracaoReferencia / 12) * avos13Utilizado;
+    
+    // Usar valor editado se fornecido
+    decimoTerceiroValor = dados.decimoTerceiroEditado !== undefined && dados.decimoTerceiroEditado >= 0
+      ? dados.decimoTerceiroEditado
+      : decimoTerceiroComAvos;
     
     verbas.push({
       rubrica: 'DECIMO_TERCEIRO',
-      descricao: `13º Salário Proporcional (${meses13}/12)`,
-      valor: decimoTerceiro,
+      descricao: `13º Salário Proporcional (${avos13Utilizado}/12)${dados.avos13Editado !== undefined ? ' - avos editado' : ''}`,
+      valor: decimoTerceiroValor,
       tipo: 'provento',
       incideInss: true,
       incideIrrf: true,
       incideFgts: true,
+      valorCalculado: decimoTerceiroCalculado,
+      valorEditado: dados.decimoTerceiroEditado !== undefined || dados.avos13Editado !== undefined,
     });
   }
 
@@ -576,13 +670,25 @@ export function calcularRescisao(dados: DadosRescisao): ResultadoRescisao {
     diasAviso: diasAvisoFinal,
     diasAvisoCalculado,
     diasAvisoEditado,
-    meses13,
-    mesesFerias,
+    meses13: avos13Utilizado,
+    mesesFerias: avosFeriasUtilizado,
     anosCompletos,
-    dsrValor,
+    // DSR separados
+    dsrHorasExtrasValor,
+    dsrComissoesValor,
+    dsrTotalValor,
     dsrDiasUteis: dados.dsrDiasUteis,
     dsrDiasNaoUteis: dados.dsrDiasNaoUteis,
     baseHoraExtra,
     valorHora,
+    // Avos
+    avosFeriasCalculado,
+    avos13Calculado,
+    avosFeriasEditado: dados.avosFeriasEditado,
+    avos13Editado: dados.avos13Editado,
+    // Totais variáveis
+    totalHorasExtras,
+    totalComissoes,
+    totalVariaveis,
   };
 }
