@@ -1,7 +1,8 @@
-import { ArrowDownCircle, ArrowUpCircle, FileText, TrendingUp, Wallet } from 'lucide-react';
+import { ArrowDownCircle, ArrowUpCircle, FileText, TrendingUp, Wallet, Info } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ResultadoRescisao, ResultadoVerba } from '@/lib/rescisao-calculator';
 
 interface RescisaoResultProps {
@@ -27,7 +28,32 @@ function VerbaRow({ verba }: { verba: ResultadoVerba }) {
           <ArrowUpCircle className="h-5 w-5 text-provento" />
         )}
         <div>
-          <p className="font-medium text-foreground">{verba.descricao}</p>
+          <div className="flex items-center gap-2">
+            <p className="font-medium text-foreground">{verba.descricao}</p>
+            {verba.detalhes && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent className="max-w-sm">
+                  <div className="space-y-2">
+                    <p className="font-medium">{verba.detalhes.descricao}</p>
+                    <p className="text-xs text-muted-foreground">{verba.detalhes.formula}</p>
+                    <div className="text-xs space-y-1">
+                      {Object.entries(verba.detalhes.valores).map(([key, val]) => (
+                        <div key={key} className="flex justify-between gap-4">
+                          <span>{key}:</span>
+                          <span className="font-mono">
+                            {typeof val === 'number' ? formatCurrency(val) : val}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </TooltipContent>
+              </Tooltip>
+            )}
+          </div>
           <div className="flex gap-1 mt-1">
             {verba.incideInss && (
               <Badge variant="outline" className="text-[10px] px-1.5 py-0">INSS</Badge>
@@ -104,6 +130,35 @@ export function RescisaoResult({ resultado }: RescisaoResultProps) {
           </CardContent>
         </Card>
       </div>
+
+      {/* Info do cálculo */}
+      {(resultado.baseHoraExtra > 0 || resultado.dsrValor > 0) && (
+        <Card className="card-elevated bg-muted/30">
+          <CardContent className="pt-6">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+              <div>
+                <p className="text-muted-foreground">Base Hora Extra</p>
+                <p className="font-mono font-semibold">{formatCurrency(resultado.baseHoraExtra)}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Valor Hora</p>
+                <p className="font-mono font-semibold">{formatCurrency(resultado.valorHora)}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Dias Aviso</p>
+                <p className="font-mono font-semibold">
+                  {resultado.diasAviso} dias
+                  {resultado.diasAvisoEditado && <span className="text-xs text-muted-foreground ml-1">(editado)</span>}
+                </p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Anos Completos</p>
+                <p className="font-mono font-semibold">{resultado.anosCompletos} ano(s)</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Detalhamento */}
       <Card className="card-elevated">

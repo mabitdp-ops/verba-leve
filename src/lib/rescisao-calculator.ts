@@ -15,6 +15,28 @@ export interface DadosRescisao {
   mediaVariaveis: number;
   descontoAvisoDias: number;
   dataTerminoContrato?: Date;
+  // Novos campos
+  horasMensais: number; // 220 ou 110
+  quebraCaixaPercent: number; // 0, 0.08, 0.10, 0.20
+  ats: number; // Adicional por tempo de serviço
+  comissoes: number;
+  insalubridade: number;
+  gratificacoes: number;
+  periculosidade: number;
+  horasExtras50: number;
+  horasExtras100: number;
+  adicionalNoturnoPercent: number; // 0.20, 0.25, 0.30, 0.50
+  horasNoturnas: number;
+  dsrDiasUteis: number;
+  dsrDiasNaoUteis: number;
+  diasAvisoEditado?: number; // Para edição manual do aviso
+  justificativaAvisoEditado?: string;
+}
+
+export interface DetalheCalculo {
+  descricao: string;
+  formula: string;
+  valores: Record<string, number | string>;
 }
 
 export interface ResultadoVerba {
@@ -25,6 +47,7 @@ export interface ResultadoVerba {
   incideInss: boolean;
   incideIrrf: boolean;
   incideFgts: boolean;
+  detalhes?: DetalheCalculo;
 }
 
 export interface ResultadoRescisao {
@@ -36,8 +59,16 @@ export interface ResultadoRescisao {
   liquido: number;
   multaFgts: number;
   diasAviso: number;
+  diasAvisoCalculado: number;
+  diasAvisoEditado: boolean;
   meses13: number;
   mesesFerias: number;
+  anosCompletos: number;
+  dsrValor: number;
+  dsrDiasUteis: number;
+  dsrDiasNaoUteis: number;
+  baseHoraExtra: number;
+  valorHora: number;
 }
 
 function calcularDiferencaMeses(dataInicio: Date, dataFim: Date): number {
@@ -59,6 +90,10 @@ function calcularDiasVinculo(dataInicio: Date, dataFim: Date): number {
 function calcularDiasAviso(diasVinculo: number): number {
   const anosCompletos = Math.floor(diasVinculo / 365);
   return Math.min(30 + Math.max(0, anosCompletos - 1) * 3, 90);
+}
+
+function calcularAnosCompletos(diasVinculo: number): number {
+  return Math.floor(diasVinculo / 365);
 }
 
 function calcularInssProgressivo(base: number): number {
@@ -110,9 +145,36 @@ export function calcularRescisao(dados: DadosRescisao): ResultadoRescisao {
   const categoria = rescisaoConfig.categorias[motivo.categoriaBase as CategoriaKey];
   if (!categoria) throw new Error('Categoria não encontrada');
 
-  const remuneracaoReferencia = dados.salarioBase + dados.mediaVariaveis;
   const diasVinculo = calcularDiasVinculo(dados.dataAdmissao, dados.dataDesligamento);
   const mesesVinculo = calcularDiferencaMeses(dados.dataAdmissao, dados.dataDesligamento);
+  const anosCompletos = calcularAnosCompletos(diasVinculo);
+  
+  // Base para hora extra (salário + adicionais)
+  const baseHoraExtra = dados.salarioBase + dados.ats + dados.comissoes + 
+    dados.insalubridade + dados.gratificacoes + dados.periculosidade;
+  
+  const valorHora = baseHoraExtra / dados.horasMensais;
+  
+  // Calcular variáveis do mês
+  const quebraCaixa = dados.salarioBase * dados.quebraCaixaPercent;
+  const horasExtras50Valor = valorHora * 1.5 * dados.horasExtras50;
+  const horasExtras100Valor = valorHora * 2.0 * dados.horasExtras100;
+  
+  // Adicional noturno (hora reduzida: 60/52.5)
+  const horasNoturasEquivalentes = dados.horasNoturnas * (60 / 52.5);
+  const adicionalNoturnoValor = valorHora * dados.adicionalNoturnoPercent * horasNoturasEquivalentes;
+  
+  // Total de variáveis para DSR
+  const totalVariaveis = dados.comissoes + horasExtras50Valor + horasExtras100Valor + adicionalNoturnoValor;
+  
+  // DSR sobre variáveis
+  let dsrValor = 0;
+  if (dados.dsrDiasUteis > 0) {
+    dsrValor = (totalVariaveis / dados.dsrDiasUteis) * dados.dsrDiasNaoUteis;
+  }
+
+  // Remuneração de referência para cálculo (salário + média de variáveis)
+  const remuneracaoReferencia = dados.salarioBase + dados.mediaVariaveis;
   
   const verbas: ResultadoVerba[] = [];
   
@@ -130,25 +192,173 @@ export function calcularRescisao(dados: DadosRescisao): ResultadoRescisao {
     });
   }
 
+  // Quebra de Caixa
+  if (quebraCaixa > 0) {
+    verbas.push({
+      rubrica: 'QUEBRA_CAIXA',
+      descricao: `Quebra de Caixa (${(dados.quebraCaixaPercent * 100).toFixed(0)}%)`,
+      valor: quebraCaixa,
+      tipo: 'provento',
+      incideInss: true,
+      incideIrrf: true,
+      incideFgts: true,
+      detalhes: {
+        descricao: 'Quebra de caixa calculada sobre salário base',
+        formula: 'Salário Base × Percentual',
+        valores: { 'Salário Base': dados.salarioBase, 'Percentual': `${(dados.quebraCaixaPercent * 100).toFixed(0)}%` }
+      }
+    });
+  }
+
+  // Horas Extras 50%
+  if (horasExtras50Valor > 0) {
+    verbas.push({
+      rubrica: 'HORAS_EXTRAS_50',
+      descricao: `Horas Extras 50% (${dados.horasExtras50}h)`,
+      valor: horasExtras50Valor,
+      tipo: 'provento',
+      incideInss: true,
+      incideIrrf: true,
+      incideFgts: true,
+      detalhes: {
+        descricao: 'Horas extras com adicional de 50%',
+        formula: '(Base ÷ Horas Mensais) × 1,5 × Quantidade',
+        valores: { 
+          'Base HE': baseHoraExtra, 
+          'Divisor': dados.horasMensais, 
+          'Valor Hora': valorHora,
+          'Quantidade': dados.horasExtras50 
+        }
+      }
+    });
+  }
+
+  // Horas Extras 100%
+  if (horasExtras100Valor > 0) {
+    verbas.push({
+      rubrica: 'HORAS_EXTRAS_100',
+      descricao: `Horas Extras 100% (${dados.horasExtras100}h)`,
+      valor: horasExtras100Valor,
+      tipo: 'provento',
+      incideInss: true,
+      incideIrrf: true,
+      incideFgts: true,
+      detalhes: {
+        descricao: 'Horas extras com adicional de 100%',
+        formula: '(Base ÷ Horas Mensais) × 2,0 × Quantidade',
+        valores: { 
+          'Base HE': baseHoraExtra, 
+          'Divisor': dados.horasMensais, 
+          'Valor Hora': valorHora,
+          'Quantidade': dados.horasExtras100 
+        }
+      }
+    });
+  }
+
+  // Adicional Noturno
+  if (adicionalNoturnoValor > 0) {
+    verbas.push({
+      rubrica: 'ADICIONAL_NOTURNO',
+      descricao: `Adicional Noturno ${(dados.adicionalNoturnoPercent * 100).toFixed(0)}% (${dados.horasNoturnas}h → ${horasNoturasEquivalentes.toFixed(2)}h eq.)`,
+      valor: adicionalNoturnoValor,
+      tipo: 'provento',
+      incideInss: true,
+      incideIrrf: true,
+      incideFgts: true,
+      detalhes: {
+        descricao: 'Adicional noturno com hora reduzida',
+        formula: 'Valor Hora × Percentual × Horas Equivalentes (h × 60/52,5)',
+        valores: { 
+          'Valor Hora': valorHora,
+          'Percentual': `${(dados.adicionalNoturnoPercent * 100).toFixed(0)}%`,
+          'Horas Trabalhadas': dados.horasNoturnas,
+          'Horas Equivalentes': horasNoturasEquivalentes.toFixed(2)
+        }
+      }
+    });
+  }
+
+  // DSR sobre Variáveis
+  if (dsrValor > 0) {
+    verbas.push({
+      rubrica: 'DSR_VARIAVEIS',
+      descricao: `DSR sobre Variáveis (${dados.dsrDiasUteis} úteis / ${dados.dsrDiasNaoUteis} não úteis)`,
+      valor: dsrValor,
+      tipo: 'provento',
+      incideInss: true,
+      incideIrrf: true,
+      incideFgts: true,
+      detalhes: {
+        descricao: 'DSR calculado sobre o total de variáveis',
+        formula: '(Total Variáveis ÷ Dias Úteis) × Dias Não Úteis',
+        valores: { 
+          'Total Variáveis': totalVariaveis,
+          'Dias Úteis': dados.dsrDiasUteis,
+          'Dias Não Úteis': dados.dsrDiasNaoUteis
+        }
+      }
+    });
+  }
+
+  // Adicionais que vão ao demonstrativo
+  if (dados.ats > 0) {
+    verbas.push({
+      rubrica: 'ATS',
+      descricao: 'Adicional por Tempo de Serviço',
+      valor: dados.ats,
+      tipo: 'provento',
+      incideInss: true,
+      incideIrrf: true,
+      incideFgts: true,
+    });
+  }
+
+  if (dados.insalubridade > 0) {
+    verbas.push({
+      rubrica: 'INSALUBRIDADE',
+      descricao: 'Adicional de Insalubridade',
+      valor: dados.insalubridade,
+      tipo: 'provento',
+      incideInss: true,
+      incideIrrf: true,
+      incideFgts: true,
+    });
+  }
+
+  if (dados.periculosidade > 0) {
+    verbas.push({
+      rubrica: 'PERICULOSIDADE',
+      descricao: 'Adicional de Periculosidade',
+      valor: dados.periculosidade,
+      tipo: 'provento',
+      incideInss: true,
+      incideIrrf: true,
+      incideFgts: true,
+    });
+  }
+
+  if (dados.gratificacoes > 0) {
+    verbas.push({
+      rubrica: 'GRATIFICACOES',
+      descricao: 'Gratificações',
+      valor: dados.gratificacoes,
+      tipo: 'provento',
+      incideInss: true,
+      incideIrrf: true,
+      incideFgts: true,
+    });
+  }
+
   // Férias Vencidas
+  let feriasVencidasValor = 0;
   if (categoria.ferias_vencidas && dados.periodosFeriasVencidas > 0) {
-    const feriasVencidas = remuneracaoReferencia * dados.periodosFeriasVencidas;
-    const tercoFeriasVencidas = feriasVencidas / 3;
+    feriasVencidasValor = remuneracaoReferencia * dados.periodosFeriasVencidas;
     
     verbas.push({
       rubrica: 'FERIAS_VENCIDAS',
       descricao: `Férias Vencidas (${dados.periodosFeriasVencidas} período${dados.periodosFeriasVencidas > 1 ? 's' : ''})`,
-      valor: feriasVencidas,
-      tipo: 'provento',
-      incideInss: false,
-      incideIrrf: false,
-      incideFgts: false,
-    });
-    
-    verbas.push({
-      rubrica: 'TERCO_FERIAS_VENCIDAS',
-      descricao: '1/3 Férias Vencidas',
-      valor: tercoFeriasVencidas,
+      valor: feriasVencidasValor,
       tipo: 'provento',
       incideInss: false,
       incideIrrf: false,
@@ -158,24 +368,14 @@ export function calcularRescisao(dados: DadosRescisao): ResultadoRescisao {
 
   // Férias Proporcionais
   const mesesFerias = mesesVinculo % 12;
+  let feriasProporcionaisValor = 0;
   if (categoria.ferias_prop && mesesFerias > 0) {
-    const feriasProporcionais = (remuneracaoReferencia / 12) * mesesFerias;
-    const tercoFeriasProp = feriasProporcionais / 3;
+    feriasProporcionaisValor = (remuneracaoReferencia / 12) * mesesFerias;
     
     verbas.push({
       rubrica: 'FERIAS_PROP',
       descricao: `Férias Proporcionais (${mesesFerias}/12)`,
-      valor: feriasProporcionais,
-      tipo: 'provento',
-      incideInss: false,
-      incideIrrf: false,
-      incideFgts: false,
-    });
-    
-    verbas.push({
-      rubrica: 'TERCO_FERIAS_PROP',
-      descricao: '1/3 Férias Proporcionais',
-      valor: tercoFeriasProp,
+      valor: feriasProporcionaisValor,
       tipo: 'provento',
       incideInss: false,
       incideIrrf: false,
@@ -200,62 +400,98 @@ export function calcularRescisao(dados: DadosRescisao): ResultadoRescisao {
   }
 
   // Aviso Prévio
-  const diasAviso = calcularDiasAviso(diasVinculo);
+  const diasAvisoCalculado = calcularDiasAviso(diasVinculo);
+  const diasAvisoFinal = dados.diasAvisoEditado !== undefined && dados.diasAvisoEditado > 0 
+    ? dados.diasAvisoEditado 
+    : diasAvisoCalculado;
+  const diasAvisoEditado = dados.diasAvisoEditado !== undefined && dados.diasAvisoEditado !== diasAvisoCalculado;
+  
   const fatorAviso = (categoria as any).fator_aviso ?? 1;
   
+  // Férias indenizadas sobre aviso (separada)
+  let feriasAvisoValor = 0;
+  
   if (categoria.aviso && dados.tipoAviso === 'INDENIZADO') {
-    const avisoIndenizado = (remuneracaoReferencia / 30) * diasAviso * fatorAviso;
+    // Aviso = (salário + médias) / 30 × dias
+    const avisoIndenizado = (remuneracaoReferencia / 30) * diasAvisoFinal * fatorAviso;
     
     verbas.push({
       rubrica: 'AVISO_PREVIO_INDENIZADO',
-      descricao: `Aviso Prévio Indenizado (${diasAviso} dias${fatorAviso < 1 ? ' - 50%' : ''})`,
+      descricao: `Aviso Prévio Indenizado (${diasAvisoFinal} dias${fatorAviso < 1 ? ' - 50%' : ''}${diasAvisoEditado ? ' - editado' : ''})`,
       valor: avisoIndenizado,
       tipo: 'provento',
       incideInss: false,
       incideIrrf: false,
       incideFgts: true,
+      detalhes: {
+        descricao: 'Aviso prévio indenizado',
+        formula: '(Salário + Médias) ÷ 30 × Dias de Aviso',
+        valores: {
+          'Base': remuneracaoReferencia,
+          'Dias Calculados': diasAvisoCalculado,
+          'Dias Utilizados': diasAvisoFinal,
+          'Anos de Serviço': anosCompletos
+        }
+      }
     });
 
-    // Reflexos sobre aviso
+    // Reflexos sobre aviso (avos por projeção)
     if (categoria.reflexos_aviso) {
-      const mesesProjecao = Math.ceil(diasAviso / 30);
+      // +1/12 por ano completo
+      const avosProjecao = anosCompletos >= 1 ? 1 : 0;
       
-      // Reflexo 13º
-      const reflexo13 = (remuneracaoReferencia / 12) * mesesProjecao;
-      verbas.push({
-        rubrica: 'REFLEXO_13_SOBRE_AVISO',
-        descricao: '13º sobre Aviso Prévio',
-        valor: reflexo13,
-        tipo: 'provento',
-        incideInss: true,
-        incideIrrf: true,
-        incideFgts: true,
-      });
+      if (avosProjecao > 0) {
+        // 13º indenizado por projeção do aviso (separado)
+        const reflexo13 = (remuneracaoReferencia / 12) * avosProjecao;
+        verbas.push({
+          rubrica: 'DECIMO_TERCEIRO_PROJECAO_AVISO',
+          descricao: `13º Indenizado por Projeção do Aviso (${avosProjecao}/12)`,
+          valor: reflexo13,
+          tipo: 'provento',
+          incideInss: true,
+          incideIrrf: true,
+          incideFgts: true,
+        });
 
-      // Reflexo Férias
-      const reflexoFerias = (remuneracaoReferencia / 12) * mesesProjecao;
-      const tercoReflexoFerias = reflexoFerias / 3;
-      
-      verbas.push({
-        rubrica: 'REFLEXO_FERIAS_SOBRE_AVISO',
-        descricao: 'Férias sobre Aviso Prévio',
-        valor: reflexoFerias,
-        tipo: 'provento',
-        incideInss: false,
-        incideIrrf: false,
-        incideFgts: false,
-      });
-      
-      verbas.push({
-        rubrica: 'TERCO_REFLEXO_FERIAS_SOBRE_AVISO',
-        descricao: '1/3 Férias sobre Aviso Prévio',
-        valor: tercoReflexoFerias,
-        tipo: 'provento',
-        incideInss: false,
-        incideIrrf: false,
-        incideFgts: false,
-      });
+        // Férias indenizadas por projeção do aviso (separada)
+        feriasAvisoValor = (remuneracaoReferencia / 12) * avosProjecao;
+        
+        verbas.push({
+          rubrica: 'FERIAS_PROJECAO_AVISO',
+          descricao: `Férias Indenizadas por Projeção do Aviso (${avosProjecao}/12)`,
+          valor: feriasAvisoValor,
+          tipo: 'provento',
+          incideInss: false,
+          incideIrrf: false,
+          incideFgts: false,
+        });
+      }
     }
+  }
+
+  // 1/3 de Férias (base única: vencidas + proporcionais + projeção aviso)
+  const baseUnicaFerias = feriasVencidasValor + feriasProporcionaisValor + feriasAvisoValor;
+  if (baseUnicaFerias > 0) {
+    const tercoFerias = baseUnicaFerias / 3;
+    verbas.push({
+      rubrica: 'TERCO_FERIAS',
+      descricao: '1/3 Constitucional de Férias',
+      valor: tercoFerias,
+      tipo: 'provento',
+      incideInss: false,
+      incideIrrf: false,
+      incideFgts: false,
+      detalhes: {
+        descricao: '1/3 constitucional sobre o total de férias',
+        formula: '(Férias Vencidas + Férias Proporcionais + Férias Aviso) ÷ 3',
+        valores: {
+          'Férias Vencidas': feriasVencidasValor,
+          'Férias Proporcionais': feriasProporcionaisValor,
+          'Férias Projeção Aviso': feriasAvisoValor,
+          'Base Total': baseUnicaFerias
+        }
+      }
+    });
   }
 
   // Desconto aviso não cumprido (Pedido de demissão)
@@ -337,8 +573,16 @@ export function calcularRescisao(dados: DadosRescisao): ResultadoRescisao {
     irrf,
     liquido,
     multaFgts,
-    diasAviso,
+    diasAviso: diasAvisoFinal,
+    diasAvisoCalculado,
+    diasAvisoEditado,
     meses13,
     mesesFerias,
+    anosCompletos,
+    dsrValor,
+    dsrDiasUteis: dados.dsrDiasUteis,
+    dsrDiasNaoUteis: dados.dsrDiasNaoUteis,
+    baseHoraExtra,
+    valorHora,
   };
 }
