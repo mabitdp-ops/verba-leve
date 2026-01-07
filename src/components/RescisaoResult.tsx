@@ -1,4 +1,4 @@
-import { ArrowDownCircle, ArrowUpCircle, FileText, TrendingUp, Wallet, Info } from 'lucide-react';
+import { ArrowDownCircle, ArrowUpCircle, FileText, TrendingUp, Wallet, Info, Edit2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
@@ -30,6 +30,12 @@ function VerbaRow({ verba }: { verba: ResultadoVerba }) {
         <div>
           <div className="flex items-center gap-2">
             <p className="font-medium text-foreground">{verba.descricao}</p>
+            {verba.valorEditado && (
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                <Edit2 className="h-2.5 w-2.5 mr-0.5" />
+                Editado
+              </Badge>
+            )}
             {verba.detalhes && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -67,9 +73,16 @@ function VerbaRow({ verba }: { verba: ResultadoVerba }) {
           </div>
         </div>
       </div>
-      <span className={`font-mono text-base font-semibold ${isDesconto ? 'text-desconto' : 'text-provento'}`}>
-        {isDesconto ? '- ' : ''}{formatCurrency(verba.valor)}
-      </span>
+      <div className="text-right">
+        <span className={`font-mono text-base font-semibold ${isDesconto ? 'text-desconto' : 'text-provento'}`}>
+          {isDesconto ? '- ' : ''}{formatCurrency(verba.valor)}
+        </span>
+        {verba.valorEditado && verba.valorCalculado !== undefined && (
+          <p className="text-xs text-muted-foreground font-mono">
+            (calc: {formatCurrency(verba.valorCalculado)})
+          </p>
+        )}
+      </div>
     </div>
   );
 }
@@ -132,7 +145,7 @@ export function RescisaoResult({ resultado }: RescisaoResultProps) {
       </div>
 
       {/* Info do cálculo */}
-      {(resultado.baseHoraExtra > 0 || resultado.dsrValor > 0) && (
+      {(resultado.baseHoraExtra > 0 || resultado.dsrTotalValor > 0) && (
         <Card className="card-elevated bg-muted/30">
           <CardContent className="pt-6">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
@@ -154,6 +167,62 @@ export function RescisaoResult({ resultado }: RescisaoResultProps) {
               <div>
                 <p className="text-muted-foreground">Anos Completos</p>
                 <p className="font-mono font-semibold">{resultado.anosCompletos} ano(s)</p>
+              </div>
+            </div>
+            
+            {/* DSR Separados */}
+            {(resultado.dsrHorasExtrasValor > 0 || resultado.dsrComissoesValor > 0) && (
+              <>
+                <Separator className="my-4" />
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                  <div>
+                    <p className="text-muted-foreground">DSR sobre HE</p>
+                    <p className="font-mono font-semibold text-provento">{formatCurrency(resultado.dsrHorasExtrasValor)}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">DSR sobre Comissões</p>
+                    <p className="font-mono font-semibold text-provento">{formatCurrency(resultado.dsrComissoesValor)}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Total DSR</p>
+                    <p className="font-mono font-semibold text-provento">{formatCurrency(resultado.dsrTotalValor)}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Dias</p>
+                    <p className="font-mono font-semibold">{resultado.dsrDiasUteis} úteis / {resultado.dsrDiasNaoUteis} não úteis</p>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Avos */}
+            <Separator className="my-4" />
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+              <div>
+                <p className="text-muted-foreground">Avos Férias</p>
+                <p className="font-mono font-semibold">
+                  {resultado.mesesFerias}/12
+                  {resultado.avosFeriasEditado !== undefined && (
+                    <span className="text-xs text-muted-foreground ml-1">(calc: {resultado.avosFeriasCalculado})</span>
+                  )}
+                </p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Avos 13º</p>
+                <p className="font-mono font-semibold">
+                  {resultado.meses13}/12
+                  {resultado.avos13Editado !== undefined && (
+                    <span className="text-xs text-muted-foreground ml-1">(calc: {resultado.avos13Calculado})</span>
+                  )}
+                </p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Total HE</p>
+                <p className="font-mono font-semibold text-provento">{formatCurrency(resultado.totalHorasExtras)}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Total Variáveis</p>
+                <p className="font-mono font-semibold text-provento">{formatCurrency(resultado.totalVariaveis)}</p>
               </div>
             </div>
           </CardContent>
