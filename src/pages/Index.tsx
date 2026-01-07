@@ -13,6 +13,10 @@ const Index = () => {
     setResultado(result);
   };
 
+  const handleClear = () => {
+    setResultado(null);
+  };
+
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
@@ -50,7 +54,7 @@ const Index = () => {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* Formulário */}
           <div>
-            <RescisaoForm onCalculate={handleCalculate} />
+            <RescisaoForm onCalculate={handleCalculate} onClear={handleClear} />
           </div>
 
           {/* Resultado */}
