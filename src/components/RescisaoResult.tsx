@@ -18,7 +18,7 @@ function formatCurrency(value: number): string {
 
 function VerbaRow({ verba }: { verba: ResultadoVerba }) {
   const isDesconto = verba.tipo === 'desconto';
-  
+
   return (
     <div className="flex items-center justify-between py-3 px-4 rounded-lg hover:bg-muted/50 transition-colors">
       <div className="flex items-center gap-3">
@@ -169,7 +169,7 @@ export function RescisaoResult({ resultado }: RescisaoResultProps) {
                 <p className="font-mono font-semibold">{resultado.anosCompletos} ano(s)</p>
               </div>
             </div>
-            
+
             {/* DSR Separados */}
             {(resultado.dsrHorasExtrasValor > 0 || resultado.dsrComissoesValor > 0) && (
               <>
@@ -263,7 +263,7 @@ export function RescisaoResult({ resultado }: RescisaoResultProps) {
                   <VerbaRow key={index} verba={verba} />
                 ))
               ) : null}
-              
+
               {/* INSS e IRRF */}
               <div className="flex items-center justify-between py-3 px-4 rounded-lg hover:bg-muted/50 transition-colors">
                 <div className="flex items-center gap-3">
@@ -322,6 +322,28 @@ export function RescisaoResult({ resultado }: RescisaoResultProps) {
                 </p>
               </div>
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Observações e Alertas CLT */}
+      {resultado.observacoes && resultado.observacoes.length > 0 && (
+        <Card className="card-elevated border-l-4 border-l-yellow-500 bg-yellow-500/5">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2 text-yellow-700">
+              <Info className="h-4 w-4" />
+              Observações e Alertas CLT
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="space-y-2">
+              {resultado.observacoes.map((obs, index) => (
+                <li key={index} className="text-sm text-muted-foreground flex items-start gap-2">
+                  <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-yellow-500 shrink-0" />
+                  {obs}
+                </li>
+              ))}
+            </ul>
           </CardContent>
         </Card>
       )}

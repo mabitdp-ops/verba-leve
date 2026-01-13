@@ -7,8 +7,9 @@ export const rescisaoConfig = {
     limite_experiencia_dias: 90,
     dias_mes_padrao: 30,
     valor_dependente_irrf: 189.59,
+    salario_minimo: 1518.00,
   },
-  
+
   motivos: [
     { codigo: "01", descricao: "Demitido COM justa causa", categoriaBase: "JUSTA_CAUSA" },
     { codigo: "02", descricao: "Demitido SEM justa causa", categoriaBase: "SEM_JUSTA_CAUSA_EQUIVALENTE" },
@@ -98,7 +99,7 @@ export const rescisaoConfig = {
       ferias_prop: true,
       decimo_terceiro: true,
       aviso: true,
-      reflexos_aviso: true,
+      reflexos_aviso: false, // Interpretação majoritária: reflexos não são devidos
       multa_fgts_percent: 0.2,
       fator_aviso: 0.5,
     },

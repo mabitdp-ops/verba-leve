@@ -14,7 +14,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { rescisaoConfig } from '@/lib/rescisao-config';
-import { DadosRescisao } from '@/lib/rescisao-calculator';
+import { DadosRescisao, VerbaNaoTributavel } from '@/lib/rescisao-calculator';
+import { FormVerbasNaoTributaveis } from './FormVerbasNaoTributaveis';
 
 interface RescisaoFormProps {
   onCalculate: (dados: DadosRescisao) => void;
@@ -58,6 +59,9 @@ const INITIAL_STATE = {
   feriasVencidasEditado: '',
   feriasProporcionaisEditado: '',
   decimoTerceiroEditado: '',
+  dataTerminoContratoStr: '',
+  dataTerminoContrato: undefined as Date | undefined,
+  verbasNaoTributaveis: [] as VerbaNaoTributavel[],
 };
 
 export function RescisaoForm({ onCalculate, onClear }: RescisaoFormProps) {
@@ -67,14 +71,14 @@ export function RescisaoForm({ onCalculate, onClear }: RescisaoFormProps) {
   const [diasAvisoCalculado, setDiasAvisoCalculado] = useState<number>(30);
 
   const updateField = useCallback(<K extends keyof typeof INITIAL_STATE>(
-    field: K, 
+    field: K,
     value: typeof INITIAL_STATE[K]
   ) => {
     setFormState(prev => ({ ...prev, [field]: value }));
   }, []);
 
   const selectedMotivo = rescisaoConfig.motivos.find(m => m.codigo === formState.motivoCodigo);
-  const showAvisoOptions = selectedMotivo && 
+  const showAvisoOptions = selectedMotivo &&
     ['SEM_JUSTA_CAUSA_EQUIVALENTE', 'ACORDO_484A'].includes(selectedMotivo.categoriaBase);
   const showDescontoAviso = selectedMotivo?.categoriaBase === 'PEDIDO_DEMISSAO';
 
@@ -111,15 +115,16 @@ export function RescisaoForm({ onCalculate, onClear }: RescisaoFormProps) {
   const handleDateChange = (field: 'dataAdmissaoStr' | 'dataDesligamentoStr') => (e: React.ChangeEvent<HTMLInputElement>) => {
     const formatted = formatDateInput(e.target.value);
     updateField(field, formatted);
-    
+
     const dateField = field === 'dataAdmissaoStr' ? 'dataAdmissao' : 'dataDesligamento';
     const parsed = parseDate(formatted);
     updateField(dateField, parsed);
   };
 
-  const handleCalendarSelect = (field: 'dataAdmissao' | 'dataDesligamento') => (date: Date | undefined) => {
+  const handleCalendarSelect = (field: 'dataAdmissao' | 'dataDesligamento' | 'dataTerminoContrato') => (date: Date | undefined) => {
     updateField(field, date);
-    const strField = field === 'dataAdmissao' ? 'dataAdmissaoStr' : 'dataDesligamentoStr';
+    const strField = field === 'dataAdmissao' ? 'dataAdmissaoStr' :
+      field === 'dataDesligamento' ? 'dataDesligamentoStr' : 'dataTerminoContratoStr';
     updateField(strField, date ? format(date, 'dd/MM/yyyy') : '');
   };
 
@@ -147,17 +152,17 @@ export function RescisaoForm({ onCalculate, onClear }: RescisaoFormProps) {
     if (!formState.dataAdmissao || !formState.dataDesligamento) {
       return { ferias: 0, decimo: 0 };
     }
-    
+
     const anos = formState.dataDesligamento.getFullYear() - formState.dataAdmissao.getFullYear();
     const meses = formState.dataDesligamento.getMonth() - formState.dataAdmissao.getMonth();
     const dias = formState.dataDesligamento.getDate() - formState.dataAdmissao.getDate();
-    
+
     let totalMeses = anos * 12 + meses;
     if (dias >= 15) totalMeses++;
-    
+
     const mesesFerias = totalMeses % 12;
     const meses13 = formState.dataDesligamento.getMonth() + 1;
-    
+
     return { ferias: mesesFerias, decimo: meses13 };
   }, [formState.dataAdmissao, formState.dataDesligamento]);
 
@@ -165,7 +170,7 @@ export function RescisaoForm({ onCalculate, onClear }: RescisaoFormProps) {
   useEffect(() => {
     const diasUteis = parseInt(formState.dsrDiasUteis) || 0;
     const diasNaoUteis = parseInt(formState.dsrDiasNaoUteis) || 0;
-    
+
     if (diasUteis > 0) {
       const salarioBase = parseCurrency(formState.salarioBase);
       const ats = parseCurrency(formState.ats);
@@ -173,23 +178,23 @@ export function RescisaoForm({ onCalculate, onClear }: RescisaoFormProps) {
       const insalubridade = parseCurrency(formState.insalubridade);
       const gratificacoes = parseCurrency(formState.gratificacoes);
       const periculosidade = parseCurrency(formState.periculosidade);
-      
+
       const baseHe = salarioBase + ats + comissoes + insalubridade + gratificacoes + periculosidade;
       const valorHora = baseHe / (parseInt(formState.horasMensais) || 220);
-      
+
       const he50 = valorHora * 1.5 * (parseFloat(formState.horasExtras50) || 0);
       const he100 = valorHora * 2.0 * (parseFloat(formState.horasExtras100) || 0);
       const horasNoturnas = parseFloat(formState.horasNoturnas) || 0;
       const noturnoPercent = parseFloat(formState.adicionalNoturnoPercent) || 0;
       const horasNoturasEq = horasNoturnas * (60 / 52.5);
       const noturno = valorHora * noturnoPercent * horasNoturasEq;
-      
+
       const totalHe = he50 + he100 + noturno;
-      
+
       // DSR separados
       const dsrHe = (totalHe / diasUteis) * diasNaoUteis;
       const dsrComissoes = (comissoes / diasUteis) * diasNaoUteis;
-      
+
       setDsrHeCalculado(dsrHe);
       setDsrComissoesCalculado(dsrComissoes);
     } else {
@@ -197,8 +202,8 @@ export function RescisaoForm({ onCalculate, onClear }: RescisaoFormProps) {
       setDsrComissoesCalculado(0);
     }
   }, [
-    formState.dsrDiasUteis, formState.dsrDiasNaoUteis, formState.comissoes, 
-    formState.horasExtras50, formState.horasExtras100, formState.horasNoturnas, 
+    formState.dsrDiasUteis, formState.dsrDiasNaoUteis, formState.comissoes,
+    formState.horasExtras50, formState.horasExtras100, formState.horasNoturnas,
     formState.adicionalNoturnoPercent, formState.salarioBase, formState.horasMensais,
     formState.ats, formState.insalubridade, formState.gratificacoes, formState.periculosidade
   ]);
@@ -211,21 +216,21 @@ export function RescisaoForm({ onCalculate, onClear }: RescisaoFormProps) {
     const insalubridade = parseCurrency(formState.insalubridade);
     const gratificacoes = parseCurrency(formState.gratificacoes);
     const periculosidade = parseCurrency(formState.periculosidade);
-    
+
     const baseHe = salarioBase + ats + comissoes + insalubridade + gratificacoes + periculosidade;
     const valorHora = baseHe / (parseInt(formState.horasMensais) || 220);
-    
+
     const he50 = valorHora * 1.5 * (parseFloat(formState.horasExtras50) || 0);
     const he100 = valorHora * 2.0 * (parseFloat(formState.horasExtras100) || 0);
     const horasNoturnas = parseFloat(formState.horasNoturnas) || 0;
     const noturnoPercent = parseFloat(formState.adicionalNoturnoPercent) || 0;
     const horasNoturasEq = horasNoturnas * (60 / 52.5);
     const noturno = valorHora * noturnoPercent * horasNoturasEq;
-    
+
     const totalHe = he50 + he100;
     const totalVariaveis = totalHe + comissoes + noturno;
     const totalDsr = dsrHeCalculado + dsrComissoesCalculado;
-    
+
     return { he50, he100, noturno, totalHe, comissoes, totalVariaveis, totalDsr };
   }, [
     formState.salarioBase, formState.ats, formState.comissoes, formState.insalubridade,
@@ -244,7 +249,7 @@ export function RescisaoForm({ onCalculate, onClear }: RescisaoFormProps) {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!formState.dataAdmissao || !formState.dataDesligamento || !formState.motivoCodigo) {
       return;
     }
@@ -258,7 +263,7 @@ export function RescisaoForm({ onCalculate, onClear }: RescisaoFormProps) {
         decimoEditado: formState.avos13Editado,
       });
     }
-    
+
     if (formState.feriasVencidasEditado || formState.feriasProporcionaisEditado || formState.decimoTerceiroEditado) {
       console.log('[AJUSTE MANUAL] Valores editados:', {
         feriasVencidasEditado: formState.feriasVencidasEditado,
@@ -303,6 +308,8 @@ export function RescisaoForm({ onCalculate, onClear }: RescisaoFormProps) {
       feriasVencidasEditado: formState.feriasVencidasEditado ? parseCurrency(formState.feriasVencidasEditado) : undefined,
       feriasProporcionaisEditado: formState.feriasProporcionaisEditado ? parseCurrency(formState.feriasProporcionaisEditado) : undefined,
       decimoTerceiroEditado: formState.decimoTerceiroEditado ? parseCurrency(formState.decimoTerceiroEditado) : undefined,
+      dataTerminoContrato: formState.dataTerminoContrato,
+      verbasNaoTributaveis: formState.verbasNaoTributaveis,
     };
 
     onCalculate(dados);
@@ -323,9 +330,9 @@ export function RescisaoForm({ onCalculate, onClear }: RescisaoFormProps) {
               Preencha as informações do funcionário
             </CardDescription>
           </div>
-          <Button 
-            type="button" 
-            variant="secondary" 
+          <Button
+            type="button"
+            variant="secondary"
             size="sm"
             onClick={handleClear}
             className="flex items-center gap-2"
@@ -456,6 +463,50 @@ export function RescisaoForm({ onCalculate, onClear }: RescisaoFormProps) {
               </div>
             )}
           </div>
+
+          {/* Data de Término (Art. 479) */}
+          {(selectedMotivo?.categoriaBase === 'A_TERMO_ANTECIPADO_EMPREGADOR') && (
+            <div className="space-y-2 p-4 bg-yellow-500/5 border border-yellow-500/20 rounded-lg animate-in fade-in slide-in-from-top-2">
+              <div className="flex items-center gap-2 mb-2">
+                <AlertCircle className="h-4 w-4 text-yellow-600" />
+                <Label className="text-sm font-semibold text-yellow-800">Data Prevista para Término do Contrato *</Label>
+              </div>
+              <div className="flex gap-2">
+                <Input
+                  value={formState.dataTerminoContratoStr}
+                  onChange={(e) => {
+                    const formatted = formatDateInput(e.target.value);
+                    updateField('dataTerminoContratoStr', formatted);
+                    const parsed = parseDate(formatted);
+                    updateField('dataTerminoContrato', parsed);
+                  }}
+                  placeholder="dd/mm/aaaa"
+                  maxLength={10}
+                  className="font-mono flex-1 border-yellow-500/30 focus-visible:ring-yellow-500"
+                />
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" size="icon" className="shrink-0 border-yellow-500/30">
+                      <CalendarIcon className="h-4 w-4" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="end">
+                    <Calendar
+                      mode="single"
+                      selected={formState.dataTerminoContrato}
+                      onSelect={handleCalendarSelect('dataTerminoContrato')}
+                      locale={ptBR}
+                      initialFocus
+                      className="pointer-events-auto"
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Necessária para o cálculo da indenização do Art. 479 CLT (50% do período restante).
+              </p>
+            </div>
+          )}
 
           <Separator />
 
@@ -702,7 +753,7 @@ export function RescisaoForm({ onCalculate, onClear }: RescisaoFormProps) {
                 />
               </div>
             </div>
-            
+
             {!dsrDiasUteisValido && (
               <div className="flex items-center gap-2 text-destructive text-sm mb-4">
                 <AlertCircle className="h-4 w-4" />
@@ -1062,10 +1113,27 @@ export function RescisaoForm({ onCalculate, onClear }: RescisaoFormProps) {
             )}
           </div>
 
-          <Button 
-            type="submit" 
+          <Separator />
+
+          {/* 5. Verbas Não Tributáveis */}
+          <FormVerbasNaoTributaveis
+            verbas={formState.verbasNaoTributaveis}
+            onChange={(verbas) => updateField('verbasNaoTributaveis', verbas)}
+          />
+
+          <Separator />
+
+          <Button
+            type="submit"
             className="w-full h-12 text-base font-semibold bg-accent hover:bg-accent/90"
-            disabled={!formState.salarioBase || !formState.dataAdmissao || !formState.dataDesligamento || !formState.motivoCodigo || !dsrDiasUteisValido}
+            disabled={
+              !formState.salarioBase ||
+              !formState.dataAdmissao ||
+              !formState.dataDesligamento ||
+              !formState.motivoCodigo ||
+              !dsrDiasUteisValido ||
+              ((selectedMotivo?.categoriaBase === 'A_TERMO_ANTECIPADO_EMPREGADOR' || (selectedMotivo as any)?.art_479) && !formState.dataTerminoContrato)
+            }
           >
             <Calculator className="mr-2 h-5 w-5" />
             Calcular Rescisão
